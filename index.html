@@ -3,57 +3,87 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Tic Tac Toe</title>
+  <title>Tic Tac Toe — Online</title>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <div class="container">
-    <h1>Tic Tac Toe</h1>
 
-    <div class="scoreboard">
-      <div class="score-item">
-        <span class="score-label x-color">X</span>
-        <span class="score-value" id="score-x">0</span>
+  <!-- SCREEN: Enter Name -->
+  <div id="screen-name" class="screen active">
+    <div class="card">
+      <h1>Tic Tac Toe</h1>
+      <p class="subtitle">Play online with friends</p>
+      <div class="form-group">
+        <input id="name-input" type="text" placeholder="Enter your name" maxlength="20" autocomplete="off" />
+        <button id="name-btn" class="btn btn-primary">Enter Lobby</button>
       </div>
-      <div class="score-item draws">
-        <span class="score-label">Draws</span>
-        <span class="score-value" id="score-draws">0</span>
-      </div>
-      <div class="score-item">
-        <span class="score-label o-color">O</span>
-        <span class="score-value" id="score-o">0</span>
-      </div>
-    </div>
-
-    <div class="status" id="status">Player X's turn</div>
-
-    <div class="board" id="board">
-      <div class="cell" data-index="0"></div>
-      <div class="cell" data-index="1"></div>
-      <div class="cell" data-index="2"></div>
-      <div class="cell" data-index="3"></div>
-      <div class="cell" data-index="4"></div>
-      <div class="cell" data-index="5"></div>
-      <div class="cell" data-index="6"></div>
-      <div class="cell" data-index="7"></div>
-      <div class="cell" data-index="8"></div>
-    </div>
-
-    <div class="controls">
-      <button class="btn btn-primary" id="reset-btn">New Game</button>
-      <button class="btn btn-secondary" id="reset-score-btn">Reset Scores</button>
-    </div>
-
-    <div class="mode-toggle">
-      <span>2 Players</span>
-      <label class="toggle">
-        <input type="checkbox" id="ai-toggle" />
-        <span class="slider"></span>
-      </label>
-      <span>vs AI</span>
+      <p class="hint">Press Enter or click the button</p>
     </div>
   </div>
 
+  <!-- SCREEN: Lobby -->
+  <div id="screen-lobby" class="screen">
+    <div class="lobby-wrap">
+      <div class="lobby-header">
+        <div>
+          <h1>Lobby</h1>
+          <p class="subtitle">Welcome, <span id="lobby-player-name"></span></p>
+        </div>
+        <button id="create-room-btn" class="btn btn-primary">+ Create Room</button>
+      </div>
+
+      <div id="rooms-list" class="rooms-list">
+        <div class="loading">Loading rooms…</div>
+      </div>
+
+      <button id="logout-btn" class="btn btn-ghost">Change Name</button>
+    </div>
+  </div>
+
+  <!-- SCREEN: Game -->
+  <div id="screen-game" class="screen">
+    <div class="game-wrap">
+      <div class="game-header">
+        <button id="back-btn" class="btn btn-ghost back">← Lobby</button>
+        <h2 id="room-title">Room</h2>
+        <div class="badge" id="room-badge">Waiting…</div>
+      </div>
+
+      <div class="players-row">
+        <div class="player-card" id="player-x-card">
+          <span class="player-mark x-color">X</span>
+          <span class="player-name" id="player-x-name">—</span>
+        </div>
+        <span class="vs">VS</span>
+        <div class="player-card" id="player-o-card">
+          <span class="player-mark o-color">O</span>
+          <span class="player-name" id="player-o-name">Waiting…</span>
+        </div>
+      </div>
+
+      <div class="status" id="game-status">Waiting for opponent…</div>
+
+      <div class="board" id="board">
+        <div class="cell" data-index="0"></div>
+        <div class="cell" data-index="1"></div>
+        <div class="cell" data-index="2"></div>
+        <div class="cell" data-index="3"></div>
+        <div class="cell" data-index="4"></div>
+        <div class="cell" data-index="5"></div>
+        <div class="cell" data-index="6"></div>
+        <div class="cell" data-index="7"></div>
+        <div class="cell" data-index="8"></div>
+      </div>
+
+      <div id="game-result" class="game-result hidden">
+        <div class="result-text" id="result-text"></div>
+        <button id="play-again-btn" class="btn btn-primary">Play Again</button>
+        <button id="back-lobby-btn" class="btn btn-secondary">Back to Lobby</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="game.js"></script>
 </body>
 </html>
