@@ -70,6 +70,7 @@ document.getElementById('logout-btn').addEventListener('click', () => {
   unsubscribeLobby();
   showScreen('screen-name');
 });
+document.getElementById('delete-all-btn').addEventListener('click', deleteAllRooms);
 
 async function initLobby() {
   document.getElementById('lobby-player-name').textContent = playerName;
@@ -126,7 +127,14 @@ function unsubscribeLobby() {
 
 // ── CREATE / JOIN ROOM ────────────────────────────────────
 async function deleteRoom(roomId) {
-  await db.from('rooms').delete().eq('id', roomId).eq('host_id', playerId);
+  await db.from('rooms').delete().eq('id', roomId);
+}
+
+async function deleteAllRooms() {
+  const pwd = prompt('Enter password to delete all rooms:');
+  if (pwd !== '1234') { alert('Wrong password.'); return; }
+  await db.from('rooms').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+  await loadRooms();
 }
 
 async function createRoom() {

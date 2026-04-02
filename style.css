@@ -310,7 +310,7 @@ input[type="text"]::placeholder { color: var(--muted); }
 .result-text { font-size: 1.3rem; font-weight: 700; color: var(--gold); }
 .game-result .btn { width: 100%; }
 
-#logout-btn { align-self: center; }
+.lobby-footer { display: flex; justify-content: center; gap: 12px; }
 
 /* Waiting pulse */
 @keyframes pulse {
