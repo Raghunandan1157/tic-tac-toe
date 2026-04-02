@@ -242,13 +242,20 @@ input[type="text"]::placeholder { color: var(--muted); }
   font-size: 2.6rem;
   font-weight: 800;
   cursor: pointer;
-  transition: background 0.2s, transform 0.15s, border-color 0.2s;
+  transition: background 0.12s, transform 0.12s, border-color 0.12s, box-shadow 0.12s;
   user-select: none;
 }
 .cell.clickable:hover {
-  background: rgba(255,255,255,0.09);
-  border-color: rgba(255,255,255,0.25);
-  transform: scale(1.04);
+  background: rgba(255,255,255,0.11);
+  border-color: rgba(255,255,255,0.3);
+  transform: scale(1.06);
+  box-shadow: 0 0 18px rgba(108,99,255,0.25);
+  cursor: pointer;
+}
+.cell.clickable:active {
+  transform: scale(0.94);
+  background: rgba(108,99,255,0.18);
+  transition: transform 0.07s, background 0.07s;
 }
 .cell.x { color: var(--x); cursor: default; }
 .cell.o { color: var(--o); cursor: default; }
