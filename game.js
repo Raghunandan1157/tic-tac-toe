@@ -184,6 +184,9 @@ function initGameScreen() {
   scoredThisRound = false;
   drawRequestedByMe = false;
   drawRequestedByOpponent = false;
+  // Remember room for reload persistence
+  localStorage.setItem('activeRoom', currentRoom.id);
+  localStorage.setItem('activeRole', myRole);
   showScreen('screen-game');
   document.getElementById('room-title').textContent = currentRoom.name;
   renderScores(currentRoom.id);
@@ -224,12 +227,21 @@ function handleDrawRequest() {
   gameChannel.send({ type: 'broadcast', event: 'draw_request', payload: { name: playerName } });
 }
 
-function doMutualDraw() {
+async function doMutualDraw() {
   clearCountdown();
   resetDrawState();
   drawRequestedByMe = false;
   drawRequestedByOpponent = false;
-  resetBoard();
+  const nextRound = (currentRoom.round || 0) + 1;
+  const starter = nextRound % 2 === 0 ? 'O' : 'X';
+  const patch = { board: ['','','','','','','','',''], current_turn: starter, status: 'playing', winner: null, round: nextRound };
+  const { data } = await db.from('rooms').update(patch).eq('id', currentRoom.id).select().single();
+  if (data) {
+    scoredThisRound = false;
+    currentRoom = data;
+    renderGame(data);
+    gameChannel.send({ type: 'broadcast', event: 'move', payload: patch });
+  }
 }
 
 function renderGame(room) {
@@ -363,7 +375,9 @@ async function makeMove(idx) {
 
 // ── RESET BOARD (anyone can trigger; DB guard prevents double-reset) ──
 async function resetBoard() {
-  const patch = { board: ['','','','','','','','',''], current_turn: 'X', status: 'playing', winner: null };
+  const nextRound = (currentRoom.round || 0) + 1;
+  const starter = nextRound % 2 === 0 ? 'O' : 'X'; // round 0,2,4→X starts; 1,3,5→O starts
+  const patch = { board: ['','','','','','','','',''], current_turn: starter, status: 'playing', winner: null, round: nextRound };
   const { data } = await db.from('rooms').update(patch)
     .eq('id', currentRoom.id)
     .eq('status', 'finished')
@@ -445,6 +459,8 @@ async function leaveGame() {
     await db.from('rooms').delete().eq('id', currentRoom.id);
   }
   unsubscribeGame();
+  localStorage.removeItem('activeRoom');
+  localStorage.removeItem('activeRole');
   currentRoom = null; myRole = null;
   initLobby();
 }
@@ -453,3 +469,22 @@ async function leaveGame() {
 function escHtml(str) {
   return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
+
+// ── AUTO-REJOIN ON RELOAD ─────────────────────────────────
+(async function autoRejoin() {
+  const roomId = localStorage.getItem('activeRoom');
+  const role   = localStorage.getItem('activeRole');
+  const name   = localStorage.getItem('playerName');
+  if (!roomId || !name) return;
+
+  playerName = name;
+  const { data } = await db.from('rooms').select('*').eq('id', roomId).single();
+  if (!data || data.status === 'finished') {
+    localStorage.removeItem('activeRoom');
+    localStorage.removeItem('activeRole');
+    return;
+  }
+  currentRoom = data;
+  myRole = role || (data.host_id === playerId ? 'host' : 'guest');
+  initGameScreen();
+})();
