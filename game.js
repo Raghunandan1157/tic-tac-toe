@@ -159,8 +159,6 @@ async function rejoinRoom(roomId) {
 
 // ── GAME SCREEN ───────────────────────────────────────────
 document.getElementById('back-btn').addEventListener('click', leaveGame);
-document.getElementById('back-lobby-btn').addEventListener('click', leaveGame);
-document.getElementById('play-again-btn').addEventListener('click', playAgain);
 document.querySelectorAll('.cell').forEach(c => c.addEventListener('click', handleCellClick));
 
 function initGameScreen() {
@@ -237,20 +235,24 @@ function renderGame(room) {
     statusEl.className = 'status';
   }
 
-  // Result
+  // Result + auto-reset
   if (room.status === 'finished') {
     const resultEl = document.getElementById('game-result');
     const resultText = document.getElementById('result-text');
     resultEl.classList.remove('hidden');
     if (room.winner === 'draw') {
-      resultText.textContent = "It's a Draw!";
+      resultText.textContent = "Draw! Restarting…";
     } else {
       const winnerName = room.winner === 'X' ? room.host_name : room.guest_name;
       const isMe = (room.winner === 'X' && myRole === 'host') || (room.winner === 'O' && myRole === 'guest');
-      resultText.textContent = isMe ? '🎉 You Win!' : `${winnerName} Wins!`;
+      resultText.textContent = isMe ? '🎉 You Win! Restarting…' : `${winnerName} Wins! Restarting…`;
     }
-    // Only host can play again (recreates room)
-    document.getElementById('play-again-btn').style.display = myRole === 'host' ? '' : 'none';
+    // Only host resets so both players don't race to update
+    if (myRole === 'host') {
+      setTimeout(resetBoard, 2500);
+    }
+  } else {
+    document.getElementById('game-result').classList.add('hidden');
   }
 }
 
@@ -313,20 +315,14 @@ async function leaveGame() {
   initLobby();
 }
 
-async function playAgain() {
-  // Host creates a fresh room with same name
-  await db.from('rooms').update({ status: 'finished' }).eq('id', currentRoom.id);
-  const { data, error } = await db
-    .from('rooms')
-    .insert({ name: currentRoom.name, host_name: playerName, host_id: playerId })
-    .select()
-    .single();
-
-  if (error || !data) { alert('Could not start new game.'); return; }
-  unsubscribeGame();
-  currentRoom = data;
-  myRole = 'host';
-  initGameScreen();
+async function resetBoard() {
+  const { data } = await db.from('rooms').update({
+    board: ['','','','','','','','',''],
+    current_turn: 'X',
+    status: 'playing',
+    winner: null
+  }).eq('id', currentRoom.id).select().single();
+  if (data) { currentRoom = data; renderGame(data); }
 }
 
 // ── Utils ─────────────────────────────────────────────────
