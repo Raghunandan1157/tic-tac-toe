@@ -23,6 +23,8 @@ let lobbyChannel = null;
 let gameChannel = null;
 let countdownTimer = null;
 let scoredThisRound = false;
+let drawRequestedByMe = false;
+let drawRequestedByOpponent = false;
 
 // ── Score helpers (localStorage, per room) ────────────────
 function getScores(roomId) {
@@ -151,16 +153,78 @@ async function rejoinRoom(roomId) {
 
 // ── GAME SCREEN ───────────────────────────────────────────
 document.getElementById('back-btn').addEventListener('click', leaveGame);
+document.getElementById('draw-btn').addEventListener('click', handleDrawRequest);
 document.querySelectorAll('.cell').forEach(c => c.addEventListener('click', handleCellClick));
+
+// Keyboard: 1-9 → cells, Space → draw request
+document.addEventListener('keydown', e => {
+  if (document.getElementById('screen-game').classList.contains('active')) {
+    if (e.key >= '1' && e.key <= '9') {
+      e.preventDefault();
+      const idx = parseInt(e.key) - 1;
+      if (!currentRoom || currentRoom.board[idx]) return;
+      const myMark = myRole === 'host' ? 'X' : 'O';
+      if (currentRoom.status !== 'playing' || currentRoom.current_turn !== myMark) return;
+      makeMove(idx);
+    }
+    if (e.key === ' ') {
+      e.preventDefault();
+      handleDrawRequest();
+    }
+  }
+});
 
 function initGameScreen() {
   clearCountdown();
   scoredThisRound = false;
+  drawRequestedByMe = false;
+  drawRequestedByOpponent = false;
   showScreen('screen-game');
   document.getElementById('room-title').textContent = currentRoom.name;
   renderScores(currentRoom.id);
   renderGame(currentRoom);
   subscribeGame();
+}
+
+function resetDrawState() {
+  drawRequestedByMe = false;
+  drawRequestedByOpponent = false;
+  const bar  = document.getElementById('draw-bar');
+  const btn  = document.getElementById('draw-btn');
+  const hint = document.getElementById('draw-hint');
+  btn.textContent = 'Draw?';
+  btn.className = 'btn btn-draw';
+  hint.textContent = '';
+  bar.classList.remove('hidden');
+}
+
+function handleDrawRequest() {
+  if (!currentRoom || currentRoom.status !== 'playing') return;
+
+  if (drawRequestedByOpponent) {
+    // Opponent already asked — this is our agreement → reset
+    gameChannel.send({ type: 'broadcast', event: 'draw_accept', payload: {} });
+    doMutualDraw();
+    return;
+  }
+
+  if (drawRequestedByMe) return; // already waiting
+
+  drawRequestedByMe = true;
+  const btn  = document.getElementById('draw-btn');
+  const hint = document.getElementById('draw-hint');
+  btn.textContent = 'Waiting…';
+  btn.className = 'btn btn-draw requested';
+  hint.textContent = 'Opponent must agree';
+  gameChannel.send({ type: 'broadcast', event: 'draw_request', payload: { name: playerName } });
+}
+
+function doMutualDraw() {
+  clearCountdown();
+  resetDrawState();
+  drawRequestedByMe = false;
+  drawRequestedByOpponent = false;
+  resetBoard();
 }
 
 function renderGame(room) {
@@ -212,8 +276,15 @@ function renderGame(room) {
     st.className = isMyTurn ? 'status your-turn' : 'status waiting-turn';
   }
 
+  // Show draw button only when game is active with 2 players
+  document.getElementById('draw-bar').classList.toggle(
+    'hidden', room.status !== 'playing'
+  );
+
   // Game over: score + countdown
   if (room.status === 'finished') {
+    resetDrawState();
+    document.getElementById('draw-bar').classList.add('hidden');
     clearCountdown();
 
     // Score (only bump once per round)
@@ -290,13 +361,13 @@ async function resetBoard() {
   const patch = { board: ['','','','','','','','',''], current_turn: 'X', status: 'playing', winner: null };
   const { data } = await db.from('rooms').update(patch)
     .eq('id', currentRoom.id)
-    .eq('status', 'finished') // guard: only resets if still finished
+    .eq('status', 'finished')
     .select().single();
   if (data) {
     scoredThisRound = false;
+    resetDrawState();
     currentRoom = data;
     renderGame(data);
-    // Broadcast the reset so the other player sees it instantly too
     gameChannel.send({ type: 'broadcast', event: 'move', payload: patch });
   }
 }
@@ -313,6 +384,19 @@ function subscribeGame() {
       scoredThisRound = false;
       currentRoom = { ...currentRoom, ...payload };
       renderGame(currentRoom);
+    })
+    // Draw request from opponent
+    .on('broadcast', { event: 'draw_request' }, ({ payload }) => {
+      drawRequestedByOpponent = true;
+      const btn  = document.getElementById('draw-btn');
+      const hint = document.getElementById('draw-hint');
+      btn.textContent = 'Agree?';
+      btn.className = 'btn btn-draw agree';
+      hint.textContent = `${payload.name} wants to draw — press Space or click`;
+    })
+    // Opponent accepted our draw request
+    .on('broadcast', { event: 'draw_accept' }, () => {
+      doMutualDraw();
     })
     // Presence: detect opponent online/offline
     .on('presence', { event: 'sync' }, () => {

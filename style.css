@@ -269,6 +269,28 @@ input[type="text"]::placeholder { color: var(--muted); }
 }
 .cell .mark { animation: popIn 0.2s ease-out; display: block; }
 
+/* Draw bar */
+.draw-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.draw-bar.hidden { display: none; }
+.btn-draw {
+  background: rgba(255,255,255,0.07);
+  color: rgba(255,255,255,0.75);
+  border: 1px solid rgba(255,255,255,0.2);
+  padding: 8px 20px;
+  font-size: 0.9rem;
+  border-radius: 10px;
+  transition: background 0.15s, border-color 0.15s, transform 0.12s;
+}
+.btn-draw:hover { background: rgba(255,255,255,0.13); border-color: rgba(255,255,255,0.35); }
+.btn-draw:active { transform: scale(0.95); }
+.btn-draw.requested { background: rgba(255,215,0,0.15); border-color: var(--gold); color: var(--gold); }
+.btn-draw.agree { background: rgba(108,99,255,0.25); border-color: var(--x); color: var(--x); }
+.draw-hint { font-size: 0.82rem; color: var(--muted); }
+
 /* Result overlay */
 .game-result {
   display: flex;
