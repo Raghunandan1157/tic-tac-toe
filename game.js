@@ -249,7 +249,7 @@ function renderGame(room) {
     }
     // Only host resets so both players don't race to update
     if (myRole === 'host') {
-      setTimeout(resetBoard, 2500);
+      setTimeout(resetBoard, 800);
     }
   } else {
     document.getElementById('game-result').classList.add('hidden');
