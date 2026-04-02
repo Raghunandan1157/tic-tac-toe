@@ -31,11 +31,9 @@
         </div>
         <button id="create-room-btn" class="btn btn-primary">+ Create Room</button>
       </div>
-
       <div id="rooms-list" class="rooms-list">
         <div class="loading">Loading rooms…</div>
       </div>
-
       <button id="logout-btn" class="btn btn-ghost">Change Name</button>
     </div>
   </div>
@@ -43,6 +41,7 @@
   <!-- SCREEN: Game -->
   <div id="screen-game" class="screen">
     <div class="game-wrap">
+
       <div class="game-header">
         <button id="back-btn" class="btn btn-ghost back">← Lobby</button>
         <h2 id="room-title">Room</h2>
@@ -53,11 +52,13 @@
         <div class="player-card" id="player-x-card">
           <span class="player-mark x-color">X</span>
           <span class="player-name" id="player-x-name">—</span>
+          <span class="player-score" id="score-x">0</span>
         </div>
         <span class="vs">VS</span>
         <div class="player-card" id="player-o-card">
           <span class="player-mark o-color">O</span>
           <span class="player-name" id="player-o-name">Waiting…</span>
+          <span class="player-score" id="score-o">0</span>
         </div>
       </div>
 
@@ -75,9 +76,6 @@
         <div class="cell" data-index="8"></div>
       </div>
 
-      <div id="game-result" class="game-result hidden">
-        <div class="result-text" id="result-text"></div>
-      </div>
     </div>
   </div>
 
