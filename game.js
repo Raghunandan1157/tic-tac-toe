@@ -14,8 +14,8 @@ const COUNTDOWN_FROM = 3;
 
 // ── State ─────────────────────────────────────────────────
 let playerName = '';
-let playerId = sessionStorage.getItem('pid') || crypto.randomUUID();
-sessionStorage.setItem('pid', playerId);
+let playerId = localStorage.getItem('pid') || crypto.randomUUID();
+localStorage.setItem('pid', playerId);
 
 let currentRoom = null;
 let myRole = null;        // 'host' | 'guest'
