@@ -108,6 +108,7 @@ function renderRooms(rooms) {
           <span class="room-status-badge ${r.status}">${label}</span>
           ${canJoin  ? `<button class="btn btn-join" onclick="joinRoom('${r.id}')">Join</button>` : ''}
           ${isMyRoom ? `<button class="btn btn-join" onclick="rejoinRoom('${r.id}')">Rejoin</button>` : ''}
+          ${r.host_id === playerId ? `<button class="btn btn-delete" onclick="deleteRoom('${r.id}')">✕</button>` : ''}
         </div>
       </div>`;
   }).join('');
@@ -124,6 +125,10 @@ function unsubscribeLobby() {
 }
 
 // ── CREATE / JOIN ROOM ────────────────────────────────────
+async function deleteRoom(roomId) {
+  await db.from('rooms').delete().eq('id', roomId).eq('host_id', playerId);
+}
+
 async function createRoom() {
   const { data, error } = await db.from('rooms')
     .insert({ name: `${playerName}'s Room`, host_name: playerName, host_id: playerId })
