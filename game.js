@@ -1,8 +1,17 @@
-// ── Supabase ──────────────────────────────────────────────
-const SUPABASE_URL = 'https://knbijsnghjcaocwtjvvw.supabase.co';
-const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtuYmlqc25naGpjYW9jd3RqdnZ3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUxMjM3MzgsImV4cCI6MjA5MDY5OTczOH0.k7wem_YuGJ9wHavFBbg00W-d1S9Q0eXmCWdtPWMIFZs';
-const { createClient } = supabase;
-const db = createClient(SUPABASE_URL, SUPABASE_KEY);
+// ── API (Neon via /api/rpc) ───────────────────────────────
+async function api(op, params = {}) {
+  try {
+    const r = await fetch('/api/rpc', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ op, ...params })
+    });
+    const j = await r.json();
+    return r.ok ? { data: j.data } : { error: j.error || 'Request failed' };
+  } catch (e) {
+    return { error: e.message };
+  }
+}
 
 // ── Constants ─────────────────────────────────────────────
 const WINNING_LINES = [
@@ -19,12 +28,11 @@ localStorage.setItem('pid', playerId);
 
 let currentRoom = null;
 let myRole = null;        // 'host' | 'guest'
-let lobbyChannel = null;
-let gameChannel = null;
+let lobbyTimer = null;
+let gameTimer = null;
+let inflight = 0;
+let lastScoredRound = null;
 let countdownTimer = null;
-let scoredThisRound = false;
-let drawRequestedByMe = false;
-let drawRequestedByOpponent = false;
 
 // ── Score helpers (localStorage, per room) ────────────────
 function getScores(roomId) {
@@ -79,14 +87,10 @@ async function initLobby() {
   subscribeLobby();
 }
 
-async function loadRooms() {
+async function loadRooms(silent) {
   const list = document.getElementById('rooms-list');
-  list.innerHTML = '<div class="loading pulse">Loading rooms…</div>';
-  const { data, error } = await db
-    .from('rooms')
-    .select('*')
-    .in('status', ['waiting', 'playing'])
-    .order('created_at', { ascending: false });
+  if (!silent) list.innerHTML = '<div class="loading pulse">Loading rooms…</div>';
+  const { data, error } = await api('list');
   if (error) { list.innerHTML = '<div class="empty">Failed to load rooms.</div>'; return; }
   renderRooms(data || []);
 }
@@ -117,47 +121,42 @@ function renderRooms(rooms) {
 
 function subscribeLobby() {
   unsubscribeLobby();
-  lobbyChannel = db.channel('lobby')
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'rooms' }, () => loadRooms())
-    .subscribe();
+  lobbyTimer = setInterval(() => loadRooms(true), 2500);
 }
 function unsubscribeLobby() {
-  if (lobbyChannel) { db.removeChannel(lobbyChannel); lobbyChannel = null; }
+  if (lobbyTimer) { clearInterval(lobbyTimer); lobbyTimer = null; }
 }
 
 // ── CREATE / JOIN ROOM ────────────────────────────────────
 async function deleteRoom(roomId) {
-  await db.from('rooms').delete().eq('id', roomId);
+  await api('remove', { roomId, playerId });
+  await loadRooms(true);
 }
 
 async function deleteAllRooms() {
   const pwd = prompt('Enter password to delete all rooms:');
-  if (pwd !== '1234') { alert('Wrong password.'); return; }
-  await db.from('rooms').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+  if (pwd === null) return;
+  const { error } = await api('removeAll', { password: pwd });
+  if (error) { alert(error); return; }
   await loadRooms();
 }
 
 async function createRoom() {
-  const { data, error } = await db.from('rooms')
-    .insert({ name: `${playerName}'s Room`, host_name: playerName, host_id: playerId })
-    .select().single();
+  const { data, error } = await api('create', { hostName: playerName, playerId });
   if (error || !data) { alert('Could not create room.'); return; }
   currentRoom = data; myRole = 'host';
   unsubscribeLobby(); initGameScreen();
 }
 
 async function joinRoom(roomId) {
-  const { data, error } = await db.from('rooms')
-    .update({ guest_name: playerName, guest_id: playerId, status: 'playing' })
-    .eq('id', roomId).eq('status', 'waiting')
-    .select().single();
+  const { data, error } = await api('join', { roomId, name: playerName, playerId });
   if (error || !data) { alert('Room no longer available.'); await loadRooms(); return; }
   currentRoom = data; myRole = 'guest';
   unsubscribeLobby(); initGameScreen();
 }
 
 async function rejoinRoom(roomId) {
-  const { data, error } = await db.from('rooms').select('*').eq('id', roomId).single();
+  const { data, error } = await api('get', { roomId, playerId });
   if (error || !data) { alert('Room not found.'); return; }
   currentRoom = data;
   myRole = data.host_id === playerId ? 'host' : 'guest';
@@ -189,9 +188,6 @@ document.addEventListener('keydown', e => {
 
 function initGameScreen() {
   clearCountdown();
-  scoredThisRound = false;
-  drawRequestedByMe = false;
-  drawRequestedByOpponent = false;
   // Remember room for reload persistence
   localStorage.setItem('activeRoom', currentRoom.id);
   localStorage.setItem('activeRole', myRole);
@@ -202,54 +198,29 @@ function initGameScreen() {
   subscribeGame();
 }
 
-function resetDrawState() {
-  drawRequestedByMe = false;
-  drawRequestedByOpponent = false;
-  const bar  = document.getElementById('draw-bar');
+function updateDrawUI(room) {
   const btn  = document.getElementById('draw-btn');
   const hint = document.getElementById('draw-hint');
-  btn.textContent = 'Draw?';
-  btn.className = 'btn btn-draw';
-  hint.textContent = '';
-  bar.classList.remove('hidden');
+  if (room.draw_by && room.draw_by !== myRole) {
+    const asker = room.draw_by === 'host' ? room.host_name : room.guest_name;
+    btn.textContent = 'Agree?';
+    btn.className = 'btn btn-draw agree';
+    hint.textContent = `${asker} wants to draw — press Space or click`;
+  } else if (room.draw_by === myRole) {
+    btn.textContent = 'Waiting…';
+    btn.className = 'btn btn-draw requested';
+    hint.textContent = 'Opponent must agree';
+  } else {
+    btn.textContent = 'Draw?';
+    btn.className = 'btn btn-draw';
+    hint.textContent = '';
+  }
 }
 
-function handleDrawRequest() {
+async function handleDrawRequest() {
   if (!currentRoom || currentRoom.status !== 'playing') return;
-
-  if (drawRequestedByOpponent) {
-    // Opponent already asked — this is our agreement → reset
-    gameChannel.send({ type: 'broadcast', event: 'draw_accept', payload: {} });
-    doMutualDraw();
-    return;
-  }
-
-  if (drawRequestedByMe) return; // already waiting
-
-  drawRequestedByMe = true;
-  const btn  = document.getElementById('draw-btn');
-  const hint = document.getElementById('draw-hint');
-  btn.textContent = 'Waiting…';
-  btn.className = 'btn btn-draw requested';
-  hint.textContent = 'Opponent must agree';
-  gameChannel.send({ type: 'broadcast', event: 'draw_request', payload: { name: playerName } });
-}
-
-async function doMutualDraw() {
-  clearCountdown();
-  resetDrawState();
-  drawRequestedByMe = false;
-  drawRequestedByOpponent = false;
-  const nextRound = (currentRoom.round || 0) + 1;
-  const starter = nextRound % 2 === 0 ? 'O' : 'X';
-  const patch = { board: ['','','','','','','','',''], current_turn: starter, status: 'playing', winner: null, round: nextRound };
-  const { data } = await db.from('rooms').update(patch).eq('id', currentRoom.id).select().single();
-  if (data) {
-    scoredThisRound = false;
-    currentRoom = data;
-    renderGame(data);
-    gameChannel.send({ type: 'broadcast', event: 'move', payload: patch });
-  }
+  if (currentRoom.draw_by === myRole) return; // already waiting
+  await mutate('draw', {});
 }
 
 function renderGame(room) {
@@ -301,20 +272,27 @@ function renderGame(room) {
     st.className = isMyTurn ? 'status your-turn' : 'status waiting-turn';
   }
 
+  updateDrawUI(room);
+
   // Show draw button only when game is active with 2 players
   document.getElementById('draw-bar').classList.toggle(
     'hidden', room.status !== 'playing'
   );
 
+  if (room.status === 'playing' && room.opponent_online === false) {
+    const st2 = document.getElementById('game-status');
+    st2.textContent = 'Opponent left the room';
+    st2.className = 'status warning';
+  }
+
   // Game over: score + countdown
   if (room.status === 'finished') {
-    resetDrawState();
     document.getElementById('draw-bar').classList.add('hidden');
     clearCountdown();
 
     // Score (only bump once per round)
-    if (!scoredThisRound) {
-      scoredThisRound = true;
+    if (lastScoredRound !== `${room.id}:${room.round}`) {
+      lastScoredRound = `${room.id}:${room.round}`;
       if (room.winner && room.winner !== 'draw') bumpScore(room.id, room.winner);
       renderScores(room.id);
     }
@@ -358,114 +336,81 @@ function handleCellClick(e) {
 }
 
 async function makeMove(idx) {
-  const myMark  = myRole === 'host' ? 'X' : 'O';
+  const myMark = myRole === 'host' ? 'X' : 'O';
   const newBoard = [...currentRoom.board];
-  newBoard[idx]  = myMark;
-
+  newBoard[idx] = myMark;
   const winLine = WINNING_LINES.find(l => l.every(i => newBoard[i] === myMark));
   const isDraw  = !winLine && newBoard.every(c => c !== '');
 
-  const patch = {
-    board: newBoard,
-    current_turn: myMark === 'X' ? 'O' : 'X',
+  // Instant local render; the server response is authoritative
+  applyRoom({
+    ...currentRoom, board: newBoard, current_turn: myMark === 'X' ? 'O' : 'X', draw_by: null,
     ...(winLine ? { status: 'finished', winner: myMark } : {}),
     ...(isDraw  ? { status: 'finished', winner: 'draw' } : {}),
-  };
-
-  // Instant local + broadcast
-  currentRoom = { ...currentRoom, ...patch };
-  renderGame(currentRoom);
-  gameChannel.send({ type: 'broadcast', event: 'move', payload: patch });
-
-  // Persist to DB (fire and forget)
-  db.from('rooms').update(patch).eq('id', currentRoom.id).then(() => {});
+  });
+  await mutate('move', { idx });
 }
 
-// ── RESET BOARD (anyone can trigger; DB guard prevents double-reset) ──
+// ── RESET BOARD (anyone can trigger; server guard prevents double-reset) ──
 async function resetBoard() {
-  const nextRound = (currentRoom.round || 0) + 1;
-  const starter = nextRound % 2 === 0 ? 'O' : 'X'; // round 0,2,4→X starts; 1,3,5→O starts
-  const patch = { board: ['','','','','','','','',''], current_turn: starter, status: 'playing', winner: null, round: nextRound };
-  const { data } = await db.from('rooms').update(patch)
-    .eq('id', currentRoom.id)
-    .eq('status', 'finished')
-    .select().single();
-  if (data) {
-    scoredThisRound = false;
-    resetDrawState();
-    currentRoom = data;
-    renderGame(data);
-    gameChannel.send({ type: 'broadcast', event: 'move', payload: patch });
-  }
+  await mutate('reset', {});
 }
 
-// ── REALTIME SUBSCRIPTION ─────────────────────────────────
+// ── SYNC (polling) ────────────────────────────────────────
+function applyRoom(room) {
+  const prev = currentRoom;
+  const changed = !prev ||
+    room.status !== prev.status || room.round !== prev.round ||
+    room.current_turn !== prev.current_turn || room.draw_by !== prev.draw_by ||
+    room.guest_id !== prev.guest_id || room.winner !== prev.winner ||
+    room.opponent_online !== prev.opponent_online ||
+    JSON.stringify(room.board) !== JSON.stringify(prev.board);
+  currentRoom = room;
+  if (!changed) return;
+  clearCountdown();
+  renderGame(room);
+}
+
+async function mutate(op, params) {
+  if (!currentRoom) return;
+  inflight++;
+  const { data, error } = await api(op, { roomId: currentRoom.id, playerId, ...params });
+  inflight--;
+  if (data && currentRoom && data.id === currentRoom.id) applyRoom(data);
+  else if (error) await pollGame();
+}
+
+async function pollGame() {
+  if (!currentRoom || inflight) return;
+  const roomId = currentRoom.id;
+  const { data, error } = await api('get', { roomId, playerId });
+  if (inflight || !currentRoom || currentRoom.id !== roomId) return;
+  if (error) {
+    if (/not found/i.test(error)) { alert('Room was closed.'); exitToLobby(); }
+    return;
+  }
+  applyRoom(data);
+}
+
 function subscribeGame() {
   unsubscribeGame();
-  gameChannel = db
-    .channel(`game:${currentRoom.id}`, { config: { presence: { key: playerId } } })
-    // Broadcast: instant move/reset from opponent
-    .on('broadcast', { event: 'move' }, ({ payload }) => {
-      if (!currentRoom) return;
-      clearCountdown();
-      scoredThisRound = false;
-      currentRoom = { ...currentRoom, ...payload };
-      renderGame(currentRoom);
-    })
-    // Draw request from opponent
-    .on('broadcast', { event: 'draw_request' }, ({ payload }) => {
-      drawRequestedByOpponent = true;
-      const btn  = document.getElementById('draw-btn');
-      const hint = document.getElementById('draw-hint');
-      btn.textContent = 'Agree?';
-      btn.className = 'btn btn-draw agree';
-      hint.textContent = `${payload.name} wants to draw — press Space or click`;
-    })
-    // Opponent accepted our draw request
-    .on('broadcast', { event: 'draw_accept' }, () => {
-      doMutualDraw();
-    })
-    // Presence: detect opponent online/offline
-    .on('presence', { event: 'sync' }, () => {
-      if (!currentRoom || currentRoom.status !== 'playing') return;
-      const online = Object.keys(gameChannel.presenceState());
-      const opponentId = myRole === 'host' ? currentRoom.guest_id : currentRoom.host_id;
-      if (opponentId && !online.includes(opponentId)) {
-        const st = document.getElementById('game-status');
-        st.textContent = 'Opponent left the room';
-        st.className = 'status warning';
-      }
-    })
-    // Postgres: fallback sync (e.g. on rejoin)
-    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'rooms', filter: `id=eq.${currentRoom.id}` },
-      ({ new: room }) => {
-        // Only apply if it's newer than what we have (avoid overwriting broadcast)
-        if (room.status !== currentRoom.status ||
-            JSON.stringify(room.board) !== JSON.stringify(currentRoom.board)) {
-          clearCountdown();
-          scoredThisRound = false;
-          currentRoom = room;
-          renderGame(room);
-        }
-      }
-    )
-    .subscribe(async status => {
-      if (status === 'SUBSCRIBED') {
-        await gameChannel.track({ name: playerName, id: playerId });
-      }
-    });
+  gameTimer = setInterval(pollGame, 1000);
 }
 
 function unsubscribeGame() {
   clearCountdown();
-  if (gameChannel) { db.removeChannel(gameChannel); gameChannel = null; }
+  if (gameTimer) { clearInterval(gameTimer); gameTimer = null; }
 }
 
 // ── LEAVE ─────────────────────────────────────────────────
 async function leaveGame() {
   if (myRole === 'host' && currentRoom.status === 'waiting') {
-    await db.from('rooms').delete().eq('id', currentRoom.id);
+    await api('remove', { roomId: currentRoom.id, playerId });
   }
+  exitToLobby();
+}
+
+function exitToLobby() {
   unsubscribeGame();
   localStorage.removeItem('activeRoom');
   localStorage.removeItem('activeRole');
@@ -486,7 +431,7 @@ function escHtml(str) {
   if (!roomId || !name) return;
 
   playerName = name;
-  const { data } = await db.from('rooms').select('*').eq('id', roomId).single();
+  const { data } = await api('get', { roomId, playerId });
   if (!data || data.status === 'finished') {
     localStorage.removeItem('activeRoom');
     localStorage.removeItem('activeRole');
